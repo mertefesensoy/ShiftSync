@@ -1,15 +1,26 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CreateShiftDialog } from "@/components/create-shift-dialog"
 import { EditShiftDialog } from "@/components/edit-shift-dialog"
 import { AssignWorkerDialog } from "@/components/assign-worker-dialog"
-import { PendingSwaps } from "@/components/pending-swaps"
 import { ShiftList } from "@/components/shift-list"
-import { canSwap } from "@/lib/swap-validator"
-import { type SwapRequest } from "@/lib/swap-types"
+
+interface DBShift {
+    id: string
+    startTime: string
+    endTime: string
+    role: string
+    userId: string | null
+    user: {
+        id: string
+        name: string | null
+        email: string | null
+        reliabilityScore: number
+    } | null
+}
 
 interface Shift {
     id: string
@@ -18,128 +29,92 @@ interface Shift {
     endTime: string
     role: string
     assignedTo?: string
+    userId?: string | null
 }
 
 interface Worker {
     id: string
-    name: string
-    email: string
-    roles: string[]
+    name: string | null
+    email: string | null
     reliabilityScore: number
 }
 
+// Helper function to convert DB shift to app shift format
+function convertDBShift(dbShift: DBShift): Shift {
+    const start = new Date(dbShift.startTime)
+    const end = new Date(dbShift.endTime)
+
+    return {
+        id: dbShift.id,
+        date: start.toISOString().split('T')[0],
+        startTime: start.toTimeString().slice(0, 5),
+        endTime: end.toTimeString().slice(0, 5),
+        role: dbShift.role,
+        assignedTo: dbShift.user?.name || undefined,
+        userId: dbShift.userId,
+    }
+}
+
 export default function ManagerDashboard() {
-    const [shifts, setShifts] = useState<Shift[]>([
-        {
-            id: "1",
-            date: "2025-11-25",
-            startTime: "09:00",
-            endTime: "17:00",
-            role: "Barista",
-            assignedTo: "John Doe",
-        },
-        {
-            id: "2",
-            date: "2025-11-26",
-            startTime: "14:00",
-            endTime: "22:00",
-            role: "Server",
-        },
-    ])
-
-    const workers: Worker[] = [
-        {
-            id: "w1",
-            name: "John Doe",
-            email: "john.doe@example.com",
-            roles: ["Barista", "Server"],
-            reliabilityScore: 95,
-        },
-        {
-            id: "w2",
-            name: "Jane Smith",
-            email: "jane.smith@example.com",
-            roles: ["Cook", "Cashier"],
-            reliabilityScore: 88,
-        },
-        {
-            id: "w3",
-            name: "Mike Johnson",
-            email: "mike.johnson@example.com",
-            roles: ["Barista"],
-            reliabilityScore: 92,
-        },
-        {
-            id: "w4",
-            name: "Sarah Williams",
-            email: "sarah.williams@example.com",
-            roles: ["Server", "Cashier"],
-            reliabilityScore: 97,
-        },
-        {
-            id: "w5",
-            name: "Tom Brown",
-            email: "tom.brown@example.com",
-            roles: ["Cook"],
-            reliabilityScore: 85,
-        },
-    ]
-
+    const [shifts, setShifts] = useState<Shift[]>([])
+    const [workers, setWorkers] = useState<Worker[]>([])
+    const [loading, setLoading] = useState(true)
     const [editingShift, setEditingShift] = useState<Shift | null>(null)
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
     const [assigningShift, setAssigningShift] = useState<Shift | null>(null)
     const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false)
 
-    // Mock swap requests
-    const [swapRequests, setSwapRequests] = useState<SwapRequest[]>([
-        {
-            id: "swap1",
-            shiftId: "2",
-            shiftDate: "2025-11-26",
-            shiftStartTime: "14:00",
-            shiftEndTime: "22:00",
-            shiftRole: "Server",
-            requestingWorkerId: "w4",
-            requestingWorkerName: "Sarah Williams",
-            status: "pending",
-            validationResult: canSwap(
-                workers.find(w => w.id === "w4")!,
-                shifts.find(s => s.id === "2")!,
-                shifts
-            ),
-            createdAt: new Date().toISOString(),
-        },
-        {
-            id: "swap2",
-            shiftId: "1",
-            shiftDate: "2025-11-25",
-            shiftStartTime: "09:00",
-            shiftEndTime: "17:00",
-            shiftRole: "Barista",
-            requestingWorkerId: "w2",
-            requestingWorkerName: "Jane Smith",
-            currentAssignee: "John Doe",
-            status: "pending",
-            validationResult: canSwap(
-                workers.find(w => w.id === "w2")!,
-                shifts.find(s => s.id === "1")!,
-                shifts
-            ),
-            createdAt: new Date().toISOString(),
-        },
-    ])
+    // Fetch shifts and workers on mount
+    useEffect(() => {
+        fetchShifts()
+        fetchWorkers()
+    }, [])
 
-    const handleShiftCreated = (newShift: {
+    async function fetchShifts() {
+        try {
+            const response = await fetch('/api/shifts')
+            if (!response.ok) throw new Error('Failed to fetch shifts')
+            const data: DBShift[] = await response.json()
+            setShifts(data.map(convertDBShift))
+        } catch (error) {
+            console.error('Error fetching shifts:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    async function fetchWorkers() {
+        try {
+            const response = await fetch('/api/workers')
+            if (!response.ok) throw new Error('Failed to fetch workers')
+            const data = await response.json()
+            setWorkers(data)
+        } catch (error) {
+            console.error('Error fetching workers:', error)
+        }
+    }
+
+    const handleShiftCreated = async (newShift: {
         date: string
         startTime: string
         endTime: string
         role: string
     }) => {
-        const shift: Shift = {
-            id: Math.random().toString(36).substr(2, 9),
-            ...newShift,
+        try {
+            const response = await fetch('/api/shifts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newShift),
+            })
+
+            if (!response.ok) throw new Error('Failed to create shift')
+
+            const dbShift: DBShift = await response.json()
+            setShifts([...(shifts || []), convertDBShift(dbShift)])
+        } catch (error) {
+            console.error('Error creating shift:', error)
+            alert('Failed to create shift')
         }
-        setShifts([...shifts, shift])
     }
 
     const handleEditShift = (shift: Shift) => {
@@ -147,12 +122,37 @@ export default function ManagerDashboard() {
         setIsEditDialogOpen(true)
     }
 
-    const handleShiftUpdated = (updatedShift: Shift) => {
-        setShifts(shifts.map(s => s.id === updatedShift.id ? updatedShift : s))
+    const handleShiftUpdated = async (updatedShift: Shift) => {
+        try {
+            const response = await fetch(`/api/shifts/${updatedShift.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedShift),
+            })
+
+            if (!response.ok) throw new Error('Failed to update shift')
+
+            const dbShift: DBShift = await response.json()
+            setShifts(shifts?.map(s => s.id === dbShift.id ? convertDBShift(dbShift) : s) || [])
+        } catch (error) {
+            console.error('Error updating shift:', error)
+            alert('Failed to update shift')
+        }
     }
 
-    const handleDeleteShift = (shiftId: string) => {
-        setShifts(shifts.filter(s => s.id !== shiftId))
+    const handleDeleteShift = async (shiftId: string) => {
+        try {
+            const response = await fetch(`/api/shifts/${shiftId}`, {
+                method: 'DELETE',
+            })
+
+            if (!response.ok) throw new Error('Failed to delete shift')
+
+            setShifts(shifts?.filter(s => s.id !== shiftId) || [])
+        } catch (error) {
+            console.error('Error deleting shift:', error)
+            alert('Failed to delete shift')
+        }
     }
 
     const handleAssignWorker = (shift: Shift) => {
@@ -160,41 +160,34 @@ export default function ManagerDashboard() {
         setIsAssignDialogOpen(true)
     }
 
-    const handleWorkerAssigned = (shiftId: string, workerId: string, workerName: string) => {
-        setShifts(shifts.map(s =>
-            s.id === shiftId ? { ...s, assignedTo: workerName } : s
-        ))
+    const handleWorkerAssigned = async (shiftId: string, workerId: string, workerName: string) => {
+        try {
+            const response = await fetch(`/api/shifts/${shiftId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: workerId }),
+            })
+
+            if (!response.ok) throw new Error('Failed to assign worker')
+
+            const dbShift: DBShift = await response.json()
+            setShifts(shifts?.map(s => s.id === shiftId ? convertDBShift(dbShift) : s) || [])
+        } catch (error) {
+            console.error('Error assigning worker:', error)
+            alert('Failed to assign worker')
+        }
     }
 
-    const handleApproveSwap = (requestId: string) => {
-        const request = swapRequests.find(r => r.id === requestId)
-        if (!request || !request.validationResult.canSwap) return
+    const openShifts = shifts?.filter((s) => !s.assignedTo).length || 0
+    const totalShifts = shifts?.length || 0
 
-        // Assign the shift to the requesting worker
-        setShifts(shifts.map(s =>
-            s.id === request.shiftId
-                ? { ...s, assignedTo: request.requestingWorkerName }
-                : s
-        ))
-
-        // Mark request as approved
-        setSwapRequests(swapRequests.map(r =>
-            r.id === requestId
-                ? { ...r, status: "approved" as const, reviewedAt: new Date().toISOString() }
-                : r
-        ))
+    if (loading) {
+        return (
+            <div className="p-8 flex items-center justify-center min-h-screen">
+                <div className="text-xl text-muted-foreground">Loading...</div>
+            </div>
+        )
     }
-
-    const handleRejectSwap = (requestId: string) => {
-        setSwapRequests(swapRequests.map(r =>
-            r.id === requestId
-                ? { ...r, status: "rejected" as const, reviewedAt: new Date().toISOString() }
-                : r
-        ))
-    }
-
-    const openShifts = shifts.filter((s) => !s.assignedTo).length
-    const totalShifts = shifts.length
 
     return (
         <div className="p-8 space-y-8">
@@ -237,13 +230,8 @@ export default function ManagerDashboard() {
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
                 <div className="col-span-4 space-y-4">
-                    <PendingSwaps
-                        swapRequests={swapRequests}
-                        onApprove={handleApproveSwap}
-                        onReject={handleRejectSwap}
-                    />
                     <ShiftList
-                        shifts={shifts}
+                        shifts={shifts || []}
                         onEditShift={handleEditShift}
                         onDeleteShift={handleDeleteShift}
                         onAssignWorker={handleAssignWorker}
@@ -257,14 +245,8 @@ export default function ManagerDashboard() {
                         <div className="space-y-4">
                             <div className="flex items-center">
                                 <div className="ml-4 space-y-1">
-                                    <p className="text-sm font-medium leading-none">Sarah Williams claimed a shift</p>
-                                    <p className="text-sm text-muted-foreground">Pending approval</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center">
-                                <div className="ml-4 space-y-1">
-                                    <p className="text-sm font-medium leading-none">Jane Smith requested swap</p>
-                                    <p className="text-sm text-muted-foreground">Validation failed</p>
+                                    <p className="text-sm font-medium leading-none">Database Connected!</p>
+                                    <p className="text-sm text-muted-foreground">Using Neon PostgreSQL</p>
                                 </div>
                             </div>
                         </div>
@@ -285,7 +267,7 @@ export default function ManagerDashboard() {
                 <AssignWorkerDialog
                     shift={assigningShift}
                     workers={workers}
-                    allShifts={shifts}
+                    allShifts={shifts || []}
                     open={isAssignDialogOpen}
                     onOpenChange={setIsAssignDialogOpen}
                     onWorkerAssigned={handleWorkerAssigned}
