@@ -1,12 +1,15 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useSession, signOut } from "next-auth/react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CreateShiftDialog } from "@/components/create-shift-dialog"
 import { EditShiftDialog } from "@/components/edit-shift-dialog"
 import { AssignWorkerDialog } from "@/components/assign-worker-dialog"
 import { ShiftList } from "@/components/shift-list"
+import { LogOut, User } from "lucide-react"
 
 interface DBShift {
     id: string
@@ -56,6 +59,8 @@ function convertDBShift(dbShift: DBShift): Shift {
 }
 
 export default function ManagerDashboard() {
+    const { data: session, status } = useSession()
+    const router = useRouter()
     const [shifts, setShifts] = useState<Shift[]>([])
     const [workers, setWorkers] = useState<Worker[]>([])
     const [loading, setLoading] = useState(true)
@@ -63,6 +68,16 @@ export default function ManagerDashboard() {
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
     const [assigningShift, setAssigningShift] = useState<Shift | null>(null)
     const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false)
+
+    // Redirect if not authenticated
+    if (status === "unauthenticated") {
+        router.push("/login")
+        return null
+    }
+
+    const handleLogout = async () => {
+        await signOut({ redirect: true, callbackUrl: "/login" })
+    }
 
     // Fetch shifts and workers on mount
     useEffect(() => {
@@ -192,8 +207,23 @@ export default function ManagerDashboard() {
     return (
         <div className="p-8 space-y-8">
             <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold tracking-tight">Manager Dashboard</h1>
-                <CreateShiftDialog onShiftCreated={handleShiftCreated} />
+                <div>
+                    <h1 className="text-3xl font-bold tracking-tight">Manager Dashboard</h1>
+                    <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
+                        <User className="h-4 w-4" />
+                        <span>{session?.user?.name || session?.user?.email}</span>
+                        <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                            {session?.user?.role || 'Manager'}
+                        </span>
+                    </div>
+                </div>
+                <div className="flex gap-2">
+                    <CreateShiftDialog onShiftCreated={handleShiftCreated} />
+                    <Button variant="outline" onClick={handleLogout}>
+                        <LogOut className="h-4 w-4 mr-2" />
+                        Logout
+                    </Button>
+                </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
